@@ -50,7 +50,17 @@ function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int, 
         frequency = _float_parameter(node, :frequency, 220.0)
         amplitude = _float_parameter(node, :amplitude, 0.2)
         phase = _float_parameter(node, :phase, 0.0)
+        pitch_depth = _float_parameter(node, :pitch_depth, 0.0)
+        pitch = isempty(input) || pitch_depth == 0 ? Float64[] : input
         return oscillator(waveform, frequency, sample_rate, n_samples;
+            amplitude = amplitude, phase = phase,
+            pitch_modulation = pitch, pitch_depth = pitch_depth)
+    elseif node.kind == :lfo
+        waveform = Symbol(lowercase(_parameter(node, :waveform, "sine")))
+        frequency = _float_parameter(node, :frequency, 1.0)
+        amplitude = _float_parameter(node, :amplitude, 1.0)
+        phase = _float_parameter(node, :phase, 0.0)
+        return lfo(waveform, frequency, sample_rate, n_samples;
             amplitude = amplitude, phase = phase)
     elseif node.kind == :adsr
         attack = _float_parameter(node, :attack, 0.01)
