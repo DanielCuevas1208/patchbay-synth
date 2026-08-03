@@ -1,0 +1,7 @@
+# A compact patch used by the golden-file regression test.
+sample_rate 8000
+duration 0.002
+output output/golden.wav
+node tone osc waveform=sine frequency=1000 amplitude=0.4
+node output gain amount=0.8
+connect tone -> output

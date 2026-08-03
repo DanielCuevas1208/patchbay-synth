@@ -1,0 +1,22 @@
+# Julia environments and generated package state
+.julia/
+
+# Rendered audio and analysis output
+*.wav
+*.flac
+*.aiff
+output/
+artifacts/
+coverage/
+
+# Julia and editor caches
+*.ji
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db

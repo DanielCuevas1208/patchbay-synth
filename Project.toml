@@ -1,0 +1,19 @@
+name = "PatchbaySynth"
+uuid = "7e5b6d3b-9f8b-4e9c-9a7e-5b0f4b6a6f11"
+authors = ["Patchbay Synth contributors"]
+version = "0.1.0"
+
+[deps]
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+WAV = "8149f6b0-98f6-5db9-b78f-408fbbb8ef88"
+
+[compat]
+FFTW = "1.8"
+WAV = "1.1"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

@@ -1,0 +1,14 @@
+julia_version = "1.10.0"
+manifest_format = "2.0"
+
+[[deps.FFTW]]
+deps = ["AbstractFFTs", "FFTW_jll", "LinearAlgebra", "MKL_jll", "Preferences", "Reexport"]
+git-tree-sha1 = "7de7c78d681078f027389e067864a8d53bd7c3c9"
+uuid = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+version = "1.8.1"
+
+[[deps.WAV]]
+deps = ["Base64", "FileIO", "Libdl", "Logging"]
+git-tree-sha1 = "1d5dc6568ab6b2846efd10cc4d070bb6be73a6b8"
+uuid = "8149f6b0-98f6-5db9-b78f-408fbbb8ef88"
+version = "1.1.1"

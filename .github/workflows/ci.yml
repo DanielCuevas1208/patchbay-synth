@@ -1,0 +1,38 @@
+name: Julia CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on Julia 1.10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+
+      - name: Cache Julia packages
+        uses: julia-actions/cache@v2
+
+      - name: Instantiate and test
+        shell: julia --project=. {0}
+        run: |
+          using Pkg
+          Pkg.resolve()
+          Pkg.instantiate()
+          Pkg.test()
+
+      - name: Render demo smoke output
+        run: julia --project=. bin/patchbay-synth.jl patches/demo.patch --output output/ci-demo.wav --gallery output/ci-gallery --duration 0.25
+
+

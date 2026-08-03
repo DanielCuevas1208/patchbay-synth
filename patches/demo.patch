@@ -1,0 +1,25 @@
+# Patchbay Synth demo: three voices, one envelope per voice, filter, delay, and master gain.
+sample_rate 44100
+duration 4.0
+output output/demo.wav
+
+node bass osc waveform=saw frequency=110 amplitude=0.18
+node melody osc waveform=sine frequency=220 amplitude=0.16
+node shimmer osc waveform=triangle frequency=330 amplitude=0.08
+
+node bass_env adsr attack=0.02 decay=0.18 sustain=0.62 release=0.40 gate=3.45
+node melody_env adsr attack=0.04 decay=0.22 sustain=0.58 release=0.42 gate=3.35
+node shimmer_env adsr attack=0.08 decay=0.30 sustain=0.42 release=0.50 gate=3.20
+
+node lowpass svf cutoff=1900 resonance=0.22 mode=low
+node echo delay time=0.28 feedback=0.24 mix=0.20
+node master gain amount=0.78
+
+connect bass -> bass_env
+connect melody -> melody_env
+connect shimmer -> shimmer_env
+connect bass_env -> lowpass
+connect melody_env -> lowpass
+connect shimmer_env -> lowpass
+connect lowpass -> echo
+connect echo -> master
