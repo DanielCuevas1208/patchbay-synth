@@ -1,32 +1,63 @@
-"""Render a band-limited-free oscillator for a fixed sample count."""
+"""Map a phase cycle to one sample of a unit-amplitude waveform."""
+function _waveform_unit(waveform::Symbol, cycle::Float64)
+    if waveform == :sine
+        sin(2pi * cycle)
+    elseif waveform == :saw
+        2.0 * cycle - 1.0
+    elseif waveform == :square
+        cycle < 0.5 ? 1.0 : -1.0
+    else
+        4.0 * abs(cycle - 0.5) - 1.0
+    end
+end
+
+"""Render a band-limited-free oscillator for a fixed sample count.
+
+When `pitch_modulation` is provided and `pitch_depth` is non-zero, the
+instantaneous frequency becomes `frequency * 2^(pitch_depth * input)`.
+The oscillator then sweeps in pitch with the modulating signal.
+"""
 function oscillator(waveform::Symbol, frequency::Real, sample_rate::Integer, n_samples::Integer;
-        amplitude::Real = 1.0, phase::Real = 0.0)
+        amplitude::Real = 1.0, phase::Real = 0.0,
+        pitch_modulation::AbstractVector{<:Real} = Float64[], pitch_depth::Real = 0.0)
     n_samples >= 0 || throw(ArgumentError("n_samples must be non-negative"))
     sample_rate > 0 || throw(ArgumentError("sample_rate must be positive"))
     frequency >= 0 || throw(ArgumentError("frequency must be non-negative"))
     amplitude >= 0 || throw(ArgumentError("amplitude must be non-negative"))
     waveform in (:sine, :saw, :square, :triangle) ||
         throw(ArgumentError("unsupported waveform '$(waveform)'"))
+    pitch_depth >= 0 || throw(ArgumentError("pitch_depth must be non-negative"))
+    isempty(pitch_modulation) || length(pitch_modulation) == n_samples ||
+        throw(ArgumentError("pitch_modulation must match n_samples"))
 
     output = Vector{Float64}(undef, n_samples)
     frequency_value = Float64(frequency)
     sample_rate_value = Float64(sample_rate)
     amplitude_value = Float64(amplitude)
     phase_value = Float64(phase)
-    for index in 1:n_samples
-        cycle = mod(phase_value + (index - 1) * frequency_value / sample_rate_value, 1.0)
-        unit = if waveform == :sine
-            sin(2pi * cycle)
-        elseif waveform == :saw
-            2.0 * cycle - 1.0
-        elseif waveform == :square
-            cycle < 0.5 ? 1.0 : -1.0
-        else
-            4.0 * abs(cycle - 0.5) - 1.0
+
+    if isempty(pitch_modulation) || pitch_depth == 0
+        for index in 1:n_samples
+            cycle = mod(phase_value + (index - 1) * frequency_value / sample_rate_value, 1.0)
+            output[index] = amplitude_value * _waveform_unit(waveform, cycle)
         end
-        output[index] = amplitude_value * unit
+    else
+        depth = Float64(pitch_depth)
+        phase_accumulator = phase_value
+        for index in 1:n_samples
+            cycle = mod(phase_accumulator, 1.0)
+            output[index] = amplitude_value * _waveform_unit(waveform, cycle)
+            instantaneous = frequency_value * exp2(depth * Float64(pitch_modulation[index]))
+            phase_accumulator += instantaneous / sample_rate_value
+        end
     end
     output
+end
+
+"""Render a bipolar low-frequency oscillator for use as a modulation source."""
+function lfo(waveform::Symbol, frequency::Real, sample_rate::Integer, n_samples::Integer;
+        amplitude::Real = 1.0, phase::Real = 0.0)
+    oscillator(waveform, frequency, sample_rate, n_samples; amplitude = amplitude, phase = phase)
 end
 
 """Create a one-shot ADSR envelope with a gate time measured from the start."""

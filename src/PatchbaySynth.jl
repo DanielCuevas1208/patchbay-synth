@@ -11,7 +11,7 @@ include("Analysis.jl")
 
 export Connection, NodeSpec, Patch, RenderResult, Spectrogram
 export parse_patch, parse_patch_file
-export oscillator, adsr_envelope, state_variable_filter, delay_effect
+export oscillator, lfo, adsr_envelope, state_variable_filter, delay_effect
 export render_patch, render_patch_file, write_wav
 export rms_level, dominant_frequency, spectrogram, write_spectrogram_svg
 export write_spectrogram_gallery

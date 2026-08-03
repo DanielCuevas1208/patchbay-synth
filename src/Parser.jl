@@ -6,7 +6,7 @@ function _parse_error(line_number::Int, message::String)
     throw(ArgumentError("patch line $(line_number): $(message)"))
 end
 
-function _parse_float(value::String, label::String, line_number::Int)
+function _parse_float(value::AbstractString, label::String, line_number::Int)
     try
         return parse(Float64, value)
     catch

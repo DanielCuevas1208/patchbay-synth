@@ -1,4 +1,4 @@
-name: Julia CI
+name: CI
 
 on:
   push:
@@ -10,8 +10,12 @@ permissions:
 
 jobs:
   test:
-    name: Test on Julia 1.10
+    name: Julia ${{ matrix.version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["1.10", "1"]
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -19,7 +23,7 @@ jobs:
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
-          version: '1.10'
+          version: ${{ matrix.version }}
 
       - name: Cache Julia packages
         uses: julia-actions/cache@v2
@@ -28,11 +32,15 @@ jobs:
         shell: julia --project=. {0}
         run: |
           using Pkg
-          Pkg.resolve()
           Pkg.instantiate()
           Pkg.test()
 
       - name: Render demo smoke output
         run: julia --project=. bin/patchbay-synth.jl patches/demo.patch --output output/ci-demo.wav --gallery output/ci-gallery --duration 0.25
 
-
+      - name: Upload rendered demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-julia${{ matrix.version }}
+          path: output/
+          if-no-files-found: error

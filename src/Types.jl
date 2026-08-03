@@ -34,7 +34,7 @@ struct Spectrogram
     magnitudes_db::Matrix{Float64}
 end
 
-const NODE_KINDS = Set([:osc, :adsr, :svf, :gain, :delay])
+const NODE_KINDS = Set([:osc, :lfo, :adsr, :svf, :gain, :delay])
 
 function _parameter(node::NodeSpec, key::Symbol, default::String)
     get(node.params, key, default)
