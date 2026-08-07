@@ -7,8 +7,8 @@ const PROJECT_ROOT = dirname(@__DIR__)
     patch = parse_patch_file(joinpath(PROJECT_ROOT, "patches", "demo.patch"))
     @test patch.sample_rate == 44_100
     @test patch.duration == 4.0
-    @test length(patch.nodes) == 12
-    @test length(patch.connections) == 11
+    @test length(patch.nodes) == 13
+    @test length(patch.connections) == 12
     @test patch.nodes[1].kind == :osc
     @test patch.nodes[1].params[:waveform] == "saw"
 
@@ -62,6 +62,30 @@ end
     @test_throws ArgumentError oscillator(:sine, 200.0, 1_000, 1_000; pitch_depth = -0.1)
 end
 
+@testset "Note events and polyphonic voices" begin
+    patch = parse_patch("""
+        sample_rate 8000
+        duration 0.5
+        node lead voice waveform=sine amplitude=0.5 attack=0 release=0.01
+        node master gain amount=0.8
+        note lead pitch=69 start=0 duration=0.2 velocity=1
+        note lead frequency=660 start=0.2 duration=0.2 velocity=0.5
+        connect lead -> master
+    """)
+    @test length(patch.notes) == 2
+    @test isapprox(patch.notes[1].frequency, 440.0; atol = 1e-12)
+    @test patch.notes[2].velocity == 0.5
+
+    result = render_patch(patch)
+    @test length(result.samples) == 4000
+    @test maximum(abs.(result.samples[1:1600])) > 0.2
+    @test maximum(abs.(result.samples[3401:end])) == 0.0
+    @test all(isfinite, result.samples)
+
+    @test_throws ArgumentError parse_patch("node lead voice\nnote lead pitch=60 duration=1 frequency=220")
+    @test_throws ArgumentError parse_patch("node lead voice\nnote lead pitch=128 duration=1")
+    @test_throws ArgumentError parse_patch("node lead voice\nnote lead pitch=60 duration=1 velocity=2")
+end
 @testset "Graph evaluation and metrics" begin
     patch = parse_patch("""
         sample_rate 8000
@@ -120,7 +144,7 @@ end
         @test written_path == wav_path
         @test isfile(wav_path)
         @test isfile(joinpath(gallery_path, "index.html"))
-        @test length(filter(name -> endswith(name, ".svg"), readdir(gallery_path))) == 12
+        @test length(filter(name -> endswith(name, ".svg"), readdir(gallery_path))) == 13
         @test size(spectrogram(result.samples, result.sample_rate).magnitudes_db, 1) == 513
     end
 end

@@ -11,6 +11,15 @@ struct Connection
     target::String
 end
 
+"""A scheduled note for a named polyphonic voice node."""
+struct NoteEvent
+    group::String
+    start::Float64
+    duration::Float64
+    frequency::Float64
+    velocity::Float64
+end
+
 """A complete patch declaration."""
 struct Patch
     sample_rate::Int
@@ -18,7 +27,12 @@ struct Patch
     output_path::String
     nodes::Vector{NodeSpec}
     connections::Vector{Connection}
+    notes::Vector{NoteEvent}
 end
+
+Patch(sample_rate::Integer, duration::Real, output_path::AbstractString,
+    nodes::Vector{NodeSpec}, connections::Vector{Connection}) =
+    Patch(Int(sample_rate), Float64(duration), String(output_path), nodes, connections, NoteEvent[])
 
 """A rendered mono track and the signal produced by every graph node."""
 struct RenderResult
@@ -34,7 +48,7 @@ struct Spectrogram
     magnitudes_db::Matrix{Float64}
 end
 
-const NODE_KINDS = Set([:osc, :lfo, :adsr, :svf, :gain, :delay])
+const NODE_KINDS = Set([:osc, :lfo, :voice, :adsr, :svf, :gain, :delay])
 
 function _parameter(node::NodeSpec, key::Symbol, default::String)
     get(node.params, key, default)

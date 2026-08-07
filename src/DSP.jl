@@ -60,6 +60,42 @@ function lfo(waveform::Symbol, frequency::Real, sample_rate::Integer, n_samples:
     oscillator(waveform, frequency, sample_rate, n_samples; amplitude = amplitude, phase = phase)
 end
 
+"""Render scheduled notes as independent voices with shared oscillator settings."""
+function polyphonic_voice(waveform::Symbol, notes::AbstractVector{<:NoteEvent},
+        sample_rate::Integer, n_samples::Integer; amplitude::Real = 1.0,
+        phase::Real = 0.0, attack::Real = 0.01, release::Real = 0.1)
+    n_samples >= 0 || throw(ArgumentError("n_samples must be non-negative"))
+    sample_rate > 0 || throw(ArgumentError("sample_rate must be positive"))
+    amplitude >= 0 || throw(ArgumentError("amplitude must be non-negative"))
+    attack >= 0 || throw(ArgumentError("attack must be non-negative"))
+    release >= 0 || throw(ArgumentError("release must be non-negative"))
+    waveform in (:sine, :saw, :square, :triangle) ||
+        throw(ArgumentError("unsupported waveform '$(waveform)'"))
+
+    output = zeros(Float64, n_samples)
+    sample_rate_value = Float64(sample_rate)
+    amplitude_value = Float64(amplitude)
+    for note in notes
+        note.start >= 0 || throw(ArgumentError("note start must be non-negative"))
+        note.duration > 0 || throw(ArgumentError("note duration must be positive"))
+        note.frequency > 0 || throw(ArgumentError("note frequency must be positive"))
+        0 <= note.velocity <= 1 || throw(ArgumentError("note velocity must be between zero and one"))
+
+        start_sample = round(Int, note.start * sample_rate_value) + 1
+        start_sample > n_samples && continue
+        duration_samples = max(1, round(Int, note.duration * sample_rate_value))
+        release_samples = release == 0 ? 0 : max(1, round(Int, release * sample_rate_value))
+        voice_length = min(n_samples - start_sample + 1, duration_samples + release_samples)
+        gate_duration = duration_samples / sample_rate_value
+        voice = oscillator(waveform, note.frequency, sample_rate, voice_length;
+            amplitude = amplitude_value * note.velocity, phase = phase)
+        envelope = adsr_envelope(attack, 0.0, 1.0, release, gate_duration,
+            sample_rate, voice_length)
+        output[start_sample:(start_sample + voice_length - 1)] .+= voice .* envelope
+    end
+    output
+end
+
 """Create a one-shot ADSR envelope with a gate time measured from the start."""
 function adsr_envelope(attack::Real, decay::Real, sustain::Real, release::Real,
         gate::Real, sample_rate::Integer, n_samples::Integer)
