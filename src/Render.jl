@@ -43,7 +43,8 @@ function _sum_inputs(signals::Vector{Vector{Float64}}, n_samples::Int)
     output
 end
 
-function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int, duration::Float64)
+function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int,
+        duration::Float64, notes::Vector{NoteEvent})
     n_samples = length(input)
     if node.kind == :osc
         waveform = Symbol(lowercase(_parameter(node, :waveform, "sine")))
@@ -62,6 +63,15 @@ function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int, 
         phase = _float_parameter(node, :phase, 0.0)
         return lfo(waveform, frequency, sample_rate, n_samples;
             amplitude = amplitude, phase = phase)
+    elseif node.kind == :voice
+        waveform = Symbol(lowercase(_parameter(node, :waveform, "sine")))
+        amplitude = _float_parameter(node, :amplitude, 0.2)
+        phase = _float_parameter(node, :phase, 0.0)
+        attack = _float_parameter(node, :attack, 0.01)
+        release = _float_parameter(node, :release, 0.1)
+        voice_notes = filter(note -> note.group == node.id, notes)
+        return polyphonic_voice(waveform, voice_notes, sample_rate, n_samples;
+            amplitude = amplitude, phase = phase, attack = attack, release = release)
     elseif node.kind == :adsr
         attack = _float_parameter(node, :attack, 0.01)
         decay = _float_parameter(node, :decay, 0.15)
@@ -110,7 +120,7 @@ function render_patch(patch::Patch; sample_rate::Integer = patch.sample_rate,
             push!(inputs, signals[patch.nodes[source_index].id])
         end
         input = _sum_inputs(inputs, n_samples)
-        signals[node.id] = _render_node(node, input, Int(sample_rate), Float64(duration))
+        signals[node.id] = _render_node(node, input, Int(sample_rate), Float64(duration), patch.notes)
     end
 
     output = zeros(Float64, n_samples)
