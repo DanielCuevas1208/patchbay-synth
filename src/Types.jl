@@ -20,6 +20,9 @@ struct ModulationInput
     range::Symbol
 end
 
+ModulationInput(source::AbstractString, target::AbstractString, parameter::Symbol) =
+    ModulationInput(String(source), String(target), parameter, :audio, :bipolar)
+
 """A scheduled note for a named polyphonic voice node."""
 struct NoteEvent
     group::String

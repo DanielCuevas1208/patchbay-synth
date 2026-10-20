@@ -95,7 +95,7 @@ function _render_node(node::NodeSpec, input::Vector{Float64},
         voice = polyphonic_voice(waveform, voice_notes, sample_rate, n_samples;
             amplitude = amplitude, phase = phase, attack = attack, release = release)
         amplitude_input = get(modulation_inputs, :amplitude, Float64[])
-        isempty(amplitude_input) ? voice :
+        return isempty(amplitude_input) ? voice :
             _apply_amplitude_modulation(voice, amplitude_input,
                 _float_parameter(node, :amplitude_depth, 1.0))
     elseif node.kind == :adsr
@@ -117,7 +117,7 @@ function _render_node(node::NodeSpec, input::Vector{Float64},
         amount = _float_parameter(node, :amount, 1.0)
         output = input .* amount
         amplitude_input = get(modulation_inputs, :amplitude, Float64[])
-        isempty(amplitude_input) ? output :
+        return isempty(amplitude_input) ? output :
             _apply_amplitude_modulation(output, amplitude_input,
                 _float_parameter(node, :amplitude_depth, 1.0))
     elseif node.kind == :delay

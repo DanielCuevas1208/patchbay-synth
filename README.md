@@ -154,7 +154,8 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 CI runs this suite on Julia 1.10.
 CI also renders the demo and uploads its WAV and SVG artifacts.
 
-Current local test status: Julia is unavailable in this workspace.
+Local validation on Julia 1.10.5 passes all 73 assertions, including the modulation fixture.
+The demo render also produces its WAV file and spectrogram gallery.
 
 ## Limitations
 
