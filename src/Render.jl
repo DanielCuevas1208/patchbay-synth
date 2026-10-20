@@ -2,16 +2,28 @@ function _topological_order(patch::Patch)
     node_index = Dict{String,Int}(node.id => index for (index, node) in enumerate(patch.nodes))
     outgoing = [Int[] for _ in patch.nodes]
     indegree = zeros(Int, length(patch.nodes))
+    edges = Tuple{String,String}[]
 
     for connection in patch.connections
-        haskey(node_index, connection.source) ||
-            throw(ArgumentError("connection references unknown source '$(connection.source)'"))
-        haskey(node_index, connection.target) ||
-            throw(ArgumentError("connection references unknown target '$(connection.target)'"))
-        connection.source == connection.target &&
-            throw(ArgumentError("node '$(connection.source)' cannot connect to itself"))
-        source_index = node_index[connection.source]
-        target_index = node_index[connection.target]
+        push!(edges, (connection.source, connection.target))
+    end
+    for modulation in patch.modulations
+        modulation.rate == :audio ||
+            throw(ArgumentError("modulation input rate must be audio"))
+        modulation.range == :bipolar ||
+            throw(ArgumentError("modulation input range must be bipolar"))
+        push!(edges, (modulation.source, modulation.target))
+    end
+
+    for (source, target) in edges
+        haskey(node_index, source) ||
+            throw(ArgumentError("connection references unknown source '$(source)'"))
+        haskey(node_index, target) ||
+            throw(ArgumentError("connection references unknown target '$(target)'"))
+        source == target &&
+            throw(ArgumentError("node '$(source)' cannot connect to itself"))
+        source_index = node_index[source]
+        target_index = node_index[target]
         push!(outgoing[source_index], target_index)
         indegree[target_index] += 1
     end
@@ -35,6 +47,12 @@ function _topological_order(patch::Patch)
     order, outgoing
 end
 
+function _validate_modulation_target(modulation::ModulationInput, node::NodeSpec)
+    ports = get(_MODULATION_PORTS, node.kind, Set{Symbol}())
+    modulation.parameter in ports ||
+        throw(ArgumentError("node '$(node.id)' does not accept modulation parameter '$(modulation.parameter)'"))
+end
+
 function _sum_inputs(signals::Vector{Vector{Float64}}, n_samples::Int)
     output = zeros(Float64, n_samples)
     for signal in signals
@@ -43,7 +61,8 @@ function _sum_inputs(signals::Vector{Vector{Float64}}, n_samples::Int)
     output
 end
 
-function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int,
+function _render_node(node::NodeSpec, input::Vector{Float64},
+        modulation_inputs::Dict{Symbol,Vector{Float64}}, sample_rate::Int,
         duration::Float64, notes::Vector{NoteEvent})
     n_samples = length(input)
     if node.kind == :osc
@@ -52,10 +71,13 @@ function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int,
         amplitude = _float_parameter(node, :amplitude, 0.2)
         phase = _float_parameter(node, :phase, 0.0)
         pitch_depth = _float_parameter(node, :pitch_depth, 0.0)
+        amplitude_depth = _float_parameter(node, :amplitude_depth, 1.0)
         pitch = isempty(input) || pitch_depth == 0 ? Float64[] : input
         return oscillator(waveform, frequency, sample_rate, n_samples;
             amplitude = amplitude, phase = phase,
-            pitch_modulation = pitch, pitch_depth = pitch_depth)
+            pitch_modulation = pitch, pitch_depth = pitch_depth,
+            amplitude_modulation = get(modulation_inputs, :amplitude, Float64[]),
+            amplitude_depth = amplitude_depth)
     elseif node.kind == :lfo
         waveform = Symbol(lowercase(_parameter(node, :waveform, "sine")))
         frequency = _float_parameter(node, :frequency, 1.0)
@@ -70,8 +92,12 @@ function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int,
         attack = _float_parameter(node, :attack, 0.01)
         release = _float_parameter(node, :release, 0.1)
         voice_notes = filter(note -> note.group == node.id, notes)
-        return polyphonic_voice(waveform, voice_notes, sample_rate, n_samples;
+        voice = polyphonic_voice(waveform, voice_notes, sample_rate, n_samples;
             amplitude = amplitude, phase = phase, attack = attack, release = release)
+        amplitude_input = get(modulation_inputs, :amplitude, Float64[])
+        return isempty(amplitude_input) ? voice :
+            _apply_amplitude_modulation(voice, amplitude_input,
+                _float_parameter(node, :amplitude_depth, 1.0))
     elseif node.kind == :adsr
         attack = _float_parameter(node, :attack, 0.01)
         decay = _float_parameter(node, :decay, 0.15)
@@ -84,10 +110,16 @@ function _render_node(node::NodeSpec, input::Vector{Float64}, sample_rate::Int,
         cutoff = _float_parameter(node, :cutoff, sample_rate / 4)
         resonance = _float_parameter(node, :resonance, 0.1)
         mode = Symbol(lowercase(_parameter(node, :mode, "low")))
-        return state_variable_filter(input, cutoff, resonance, sample_rate; mode = mode)
+        return state_variable_filter(input, cutoff, resonance, sample_rate; mode = mode,
+            cutoff_modulation = get(modulation_inputs, :cutoff, Float64[]),
+            cutoff_depth = _float_parameter(node, :cutoff_depth, 1.0))
     elseif node.kind == :gain
         amount = _float_parameter(node, :amount, 1.0)
-        return input .* amount
+        output = input .* amount
+        amplitude_input = get(modulation_inputs, :amplitude, Float64[])
+        return isempty(amplitude_input) ? output :
+            _apply_amplitude_modulation(output, amplitude_input,
+                _float_parameter(node, :amplitude_depth, 1.0))
     elseif node.kind == :delay
         delay_time = _float_parameter(node, :time, 0.25)
         feedback = _float_parameter(node, :feedback, 0.2)
@@ -105,22 +137,36 @@ function render_patch(patch::Patch; sample_rate::Integer = patch.sample_rate,
     n_samples = round(Int, Float64(duration) * sample_rate)
     n_samples > 0 || throw(ArgumentError("duration produces no samples"))
     order, outgoing = _topological_order(patch)
+    node_indices = Dict{String,Int}(node.id => index for (index, node) in enumerate(patch.nodes))
     node_inputs = [Int[] for _ in patch.nodes]
     for connection in patch.connections
-        source_index = findfirst(node -> node.id == connection.source, patch.nodes)
-        target_index = findfirst(node -> node.id == connection.target, patch.nodes)
+        source_index = node_indices[connection.source]
+        target_index = node_indices[connection.target]
         push!(node_inputs[target_index], source_index)
+    end
+    node_modulation_sources = [Dict{Symbol,Vector{Int}}() for _ in patch.nodes]
+    for modulation in patch.modulations
+        target_index = node_indices[modulation.target]
+        _validate_modulation_target(modulation, patch.nodes[target_index])
+        source_index = node_indices[modulation.source]
+        push!(get!(node_modulation_sources[target_index], modulation.parameter, Int[]), source_index)
     end
 
     signals = Dict{String,Vector{Float64}}()
-    for node_index in order
-        node = patch.nodes[node_index]
+    for current_index in order
+        node = patch.nodes[current_index]
         inputs = Vector{Vector{Float64}}()
-        for source_index in node_inputs[node_index]
+        for source_index in node_inputs[current_index]
             push!(inputs, signals[patch.nodes[source_index].id])
         end
         input = _sum_inputs(inputs, n_samples)
-        signals[node.id] = _render_node(node, input, Int(sample_rate), Float64(duration), patch.notes)
+        modulation_inputs = Dict{Symbol,Vector{Float64}}()
+        for (parameter, source_indices) in node_modulation_sources[current_index]
+            sources = [signals[patch.nodes[source_index].id] for source_index in source_indices]
+            modulation_inputs[parameter] = _sum_inputs(sources, n_samples)
+        end
+        signals[node.id] = _render_node(node, input, modulation_inputs,
+            Int(sample_rate), Float64(duration), patch.notes)
     end
 
     output = zeros(Float64, n_samples)

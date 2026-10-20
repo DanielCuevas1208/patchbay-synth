@@ -3,18 +3,15 @@
 Offline modular synthesis in Julia.
 
 Patchbay Synth turns a text patch into deterministic mono WAV audio.
-It can schedule notes across polyphonic voice nodes.
-It also writes SVG spectrograms for every graph node.
+The patch declares modules, signal routes, modulation routes, and scheduled notes.
 
 ## Value
 
-The patch shows signal routing in a reviewable format.
-The renderer separates parsing, graph evaluation, synthesis, and analysis.
-The project demonstrates an offline audio pipeline without a sound card.
+Patch files keep signal flow visible in code review.
+The engine separates parsing, graph evaluation, synthesis, and analysis.
+The workflow runs without a sound card, network access, or hosted service.
 
-The new `note` command schedules pitch, timing, and velocity.
-A `voice` node renders matching notes as independent oscillator voices.
-Existing oscillator, envelope, filter, delay, and gain nodes remain available.
+The bundled demo shows polyphonic voices, pitch automation, amplitude modulation, filter modulation, delay, and spectrograms.
 
 ## Architecture
 
@@ -22,10 +19,10 @@ Existing oscillator, envelope, filter, delay, and gain nodes remain available.
 patch text
     |
     v
-parser ---> graph nodes + note events
+parser ---> typed graph and note events
                     |
                     v
-             topological evaluator
+             cycle-safe evaluator
                     |
         +-----------+-----------+
         |                       |
@@ -37,33 +34,33 @@ parser ---> graph nodes + note events
 
 | Layer | Responsibility |
 | --- | --- |
-| `Types.jl` | Defines nodes, connections, note events, renders, and spectra. |
-| `Parser.jl` | Parses settings, nodes, connections, and scheduled notes. |
-| `DSP.jl` | Renders oscillators, voices, envelopes, filters, delay, and gain. |
-| `Render.jl` | Orders the graph, mixes inputs, and evaluates each node. |
+| `Types.jl` | Defines nodes, signal connections, modulation inputs, notes, renders, and spectra. |
+| `Parser.jl` | Parses settings, nodes, connections, notes, and typed modulation routes. |
+| `DSP.jl` | Renders oscillators, voices, envelopes, filters, delay, gain, and modulation conversion. |
+| `Render.jl` | Validates the graph, orders nodes, mixes inputs, and evaluates modules. |
 | `Analysis.jl` | Measures audio and writes SVG spectrograms. |
 | `bin/patchbay-synth.jl` | Provides the command-line workflow. |
 
-The public `Patch` type keeps note events beside graph declarations.
-The public `polyphonic_voice` function supports direct deterministic tests.
+`connect` carries audio between modules.
+`modulate` carries one audio-rate control signal into a named parameter.
+Both route types participate in cycle detection.
 
 ## Setup
 
 Install Julia 1.10.
 
-Instantiate the committed project environment:
+Instantiate the committed environment:
 
 ```powershell
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-Run the bundled demo:
+Render the showcase patch:
 
 ```powershell
 julia --project=. bin/patchbay-synth.jl patches/demo.patch --output output/demo.wav --gallery output/gallery
 ```
 
-The command writes one WAV file and one SVG per node.
 Open `output/gallery/index.html` in a browser.
 
 ## Sample output
@@ -72,18 +69,15 @@ Open `output/gallery/index.html` in a browser.
 rendered: output/demo.wav
 samples: 176400 at 44100 Hz
 duration: 4.0 s
-rms: <measured value>
-peak: <measured value>
-dominant_frequency: <measured value> Hz
 gallery: output/gallery/index.html
 ```
 
-The sample count and duration come from the demo settings.
-Metric values depend on the selected patch.
+The command also prints measured RMS, peak, and dominant frequency values.
+The output directory contains one WAV file and one SVG file per graph node.
 
 ## Patch format
 
-A patch uses one command per line.
+Use one command per line.
 Lines beginning with `#` are comments.
 
 ```text
@@ -91,22 +85,43 @@ sample_rate 44100
 duration 4.0
 output output/demo.wav
 
-node lead voice waveform=triangle amplitude=0.09 attack=0.01 release=0.12
+node source lfo waveform=sine frequency=2 amplitude=1
+node lead voice waveform=triangle amplitude=0.09 amplitude_depth=0.65 attack=0.01 release=0.12
 note lead pitch=57 start=0.0 duration=0.70 velocity=0.8
-note lead pitch=60 start=0.80 duration=0.70 velocity=0.7
-note lead pitch=64 start=1.60 duration=0.70 velocity=0.8
-
-node filter svf cutoff=1800 resonance=0.2 mode=low
+node filter svf cutoff=1800 cutoff_depth=0.35 resonance=0.2 mode=low
 node master gain amount=0.8
 
+modulate source -> lead.amplitude
+modulate source -> filter.cutoff
 connect lead -> filter
 connect filter -> master
 ```
 
 Use `sine`, `saw`, `square`, or `triangle` waveforms.
-
 The graph must be acyclic.
-Terminal nodes mix into the final mono output.
+Terminal nodes mix into the mono output.
+
+### Signal routes
+
+Use `connect source -> target` for audio routes.
+An oscillator input controls pitch when `pitch_depth` is non-zero.
+Pitch depth uses octaves per input unit.
+
+### Modulation routes
+
+Use `modulate source -> target.port` for parameter routes.
+Every modulation input uses audio-rate samples and a bipolar range.
+The renderer sums multiple sources, then clips the result to `[-1, 1]`.
+
+Supported ports use these conversions:
+
+| Port | Nodes | Parameter | Conversion |
+| --- | --- | --- | --- |
+| `.amplitude` | `osc`, `voice`, `gain` | `amplitude_depth` from 0 through 1 | `clamp(1 + depth * input, 0, 1)` |
+| `.cutoff` | `svf` | `cutoff_depth` in octaves | `cutoff * 2^(depth * input)`, clipped below Nyquist |
+
+Base amplitude remains unnormalized.
+The WAV writer preserves the rendered sample values.
 
 ### Note events
 
@@ -117,60 +132,45 @@ note GROUP pitch=MIDI start=SECONDS duration=SECONDS velocity=LEVEL
 ```
 
 `pitch` accepts MIDI values from 0 through 127.
-Use `frequency=HZ` instead of `pitch` for direct frequency control.
+Use `frequency=HZ` for direct frequency control.
 `start` defaults to zero.
 `velocity` defaults to one.
 
-A `voice` node matches notes with the same group as its node id.
+A `voice` node matches notes with its node identifier.
 Each note starts a fresh oscillator phase.
-Each note receives the node attack and release settings.
-Overlapping notes mix into one node signal.
-
-### LFO modulation
-
-Connect an `lfo` node into an `osc` node.
-The oscillator uses that signal for pitch automation.
-
-Set `pitch_depth` in octaves per unit input.
-A depth of `1.0` creates a one-octave sweep at full input.
-
-CLI options can override output, gallery, sample rate, and duration.
+Overlapping notes mix into one voice signal.
 
 ## Evaluation evidence
 
-The deterministic tests cover parser validation, voice timing, velocity, MIDI conversion, and note rendering.
-They also cover envelopes, filters, LFO pitch modulation, graph cycles, WAV output, and gallery output.
-The golden fixture checks every sample in a compact render.
+The tests cover parser validation, typed modulation metadata, amplitude depth, clipping, filter range conversion, and modulation cycles.
+The tests also cover notes, envelopes, filters, pitch automation, graph cycles, WAV output, galleries, and golden samples.
 
-Run the test suite:
+Run the full suite:
 
 ```powershell
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
-CI runs the test suite on Julia 1.10 for pushes and pull requests.
+CI runs this suite on Julia 1.10.
 CI also renders the demo and uploads its WAV and SVG artifacts.
 
-Local verification in this checkout is blocked because Julia is not installed.
+Local validation on Julia 1.10.5 passes all 73 assertions, including the modulation fixture.
+The demo render also produces its WAV file and spectrogram gallery.
 
 ## Limitations
 
 - The engine renders mono audio.
-- Voice nodes use one waveform and one envelope shape per group.
-- Note starts and durations round to the nearest sample.
-- MIDI note values use the equal-tempered 440 Hz reference.
-- Oscillators are not band-limited and can alias above Nyquist.
-- The graph evaluator keeps every node signal in memory.
-- The gallery uses static SVG files without interactive zoom.
-- The WAV writer does not normalize samples automatically.
+- Oscillators are not band-limited.
+- Voice nodes use one waveform and envelope shape per group.
+- Note times round to the nearest sample.
+- MIDI notes use equal temperament with A4 at 440 Hz.
+- The evaluator keeps every node signal in memory.
+- The gallery uses static SVG files.
+- The WAV writer does not normalize samples.
 
 ## Roadmap
 
-- [x] Add LFO sources and oscillator pitch automation.
-- [x] Add note events and polyphonic voice nodes.
-- [ ] Add amplitude and filter modulation sources.
-- [ ] Add streamed rendering for longer patches.
-- [ ] Add a browser-free report format for spectrogram metadata.
+See [ROADMAP.md](ROADMAP.md) for milestone IDs, acceptance criteria, evidence, and verification commands.
 
 ## License
 

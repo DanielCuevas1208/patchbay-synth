@@ -62,6 +62,7 @@ function parse_patch(text::AbstractString)
     nodes = NodeSpec[]
     notes = NoteEvent[]
     connections = Connection[]
+    modulations = ModulationInput[]
     node_ids = Set{String}()
 
     for (line_number, raw_line) in enumerate(split(String(text), '\n'; keepempty = true))
@@ -110,13 +111,23 @@ function parse_patch(text::AbstractString)
         elseif command == "connect"
             length(tokens) == 4 && tokens[3] == "->" || _parse_error(line_number, "connect uses: connect source -> target")
             push!(connections, Connection(tokens[2], tokens[4]))
+        elseif command == "modulate"
+            length(tokens) == 4 && tokens[3] == "->" ||
+                _parse_error(line_number, "modulate uses: modulate source -> target.parameter")
+            target_parts = split(tokens[4], '.'; limit = 2)
+            length(target_parts) == 2 && !isempty(target_parts[1]) && !isempty(target_parts[2]) ||
+                _parse_error(line_number, "modulate target uses target.parameter")
+            parameter = Symbol(lowercase(target_parts[2]))
+            parameter in (:amplitude, :cutoff) ||
+                _parse_error(line_number, "unsupported modulation parameter '$(parameter)'")
+            push!(modulations, ModulationInput(tokens[2], target_parts[1], parameter))
         else
             _parse_error(line_number, "unknown command '$(tokens[1])'")
         end
     end
 
     isempty(nodes) && throw(ArgumentError("patch must declare at least one node"))
-    Patch(sample_rate, duration, output_path, nodes, connections, notes)
+    Patch(sample_rate, duration, output_path, nodes, connections, notes, modulations)
 end
 
 function parse_patch_file(path::AbstractString)

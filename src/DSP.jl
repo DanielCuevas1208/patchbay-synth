@@ -11,6 +11,33 @@ function _waveform_unit(waveform::Symbol, cycle::Float64)
     end
 end
 
+function _normalized_bipolar(value::Real)
+    value_float = Float64(value)
+    isfinite(value_float) || throw(ArgumentError("modulation values must be finite"))
+    clamp(value_float, -1.0, 1.0)
+end
+
+function _amplitude_gain(value::Real, depth::Real)
+    clamp(1.0 + Float64(depth) * _normalized_bipolar(value), 0.0, 1.0)
+end
+
+function _validate_amplitude_depth(depth::Real)
+    isfinite(Float64(depth)) && 0 <= depth <= 1 ||
+        throw(ArgumentError("amplitude_depth must be between zero and one"))
+end
+
+function _apply_amplitude_modulation(input::AbstractVector{<:Real},
+        modulation::AbstractVector{<:Real}, depth::Real)
+    length(input) == length(modulation) ||
+        throw(ArgumentError("amplitude_modulation must match the signal length"))
+    _validate_amplitude_depth(depth)
+    output = Vector{Float64}(undef, length(input))
+    for index in eachindex(input)
+        output[index] = Float64(input[index]) * _amplitude_gain(modulation[index], depth)
+    end
+    output
+end
+
 """Render a band-limited-free oscillator for a fixed sample count.
 
 When `pitch_modulation` is provided and `pitch_depth` is non-zero, the
@@ -19,7 +46,8 @@ The oscillator then sweeps in pitch with the modulating signal.
 """
 function oscillator(waveform::Symbol, frequency::Real, sample_rate::Integer, n_samples::Integer;
         amplitude::Real = 1.0, phase::Real = 0.0,
-        pitch_modulation::AbstractVector{<:Real} = Float64[], pitch_depth::Real = 0.0)
+        pitch_modulation::AbstractVector{<:Real} = Float64[], pitch_depth::Real = 0.0,
+        amplitude_modulation::AbstractVector{<:Real} = Float64[], amplitude_depth::Real = 0.0)
     n_samples >= 0 || throw(ArgumentError("n_samples must be non-negative"))
     sample_rate > 0 || throw(ArgumentError("sample_rate must be positive"))
     frequency >= 0 || throw(ArgumentError("frequency must be non-negative"))
@@ -27,8 +55,11 @@ function oscillator(waveform::Symbol, frequency::Real, sample_rate::Integer, n_s
     waveform in (:sine, :saw, :square, :triangle) ||
         throw(ArgumentError("unsupported waveform '$(waveform)'"))
     pitch_depth >= 0 || throw(ArgumentError("pitch_depth must be non-negative"))
+    _validate_amplitude_depth(amplitude_depth)
     isempty(pitch_modulation) || length(pitch_modulation) == n_samples ||
         throw(ArgumentError("pitch_modulation must match n_samples"))
+    isempty(amplitude_modulation) || length(amplitude_modulation) == n_samples ||
+        throw(ArgumentError("amplitude_modulation must match n_samples"))
 
     output = Vector{Float64}(undef, n_samples)
     frequency_value = Float64(frequency)
@@ -39,19 +70,29 @@ function oscillator(waveform::Symbol, frequency::Real, sample_rate::Integer, n_s
     if isempty(pitch_modulation) || pitch_depth == 0
         for index in 1:n_samples
             cycle = mod(phase_value + (index - 1) * frequency_value / sample_rate_value, 1.0)
-            output[index] = amplitude_value * _waveform_unit(waveform, cycle)
+            gain = isempty(amplitude_modulation) ? 1.0 :
+                _amplitude_gain(amplitude_modulation[index], amplitude_depth)
+            output[index] = amplitude_value * gain * _waveform_unit(waveform, cycle)
         end
     else
         depth = Float64(pitch_depth)
         phase_accumulator = phase_value
         for index in 1:n_samples
             cycle = mod(phase_accumulator, 1.0)
-            output[index] = amplitude_value * _waveform_unit(waveform, cycle)
+            gain = isempty(amplitude_modulation) ? 1.0 :
+                _amplitude_gain(amplitude_modulation[index], amplitude_depth)
+            output[index] = amplitude_value * gain * _waveform_unit(waveform, cycle)
             instantaneous = frequency_value * exp2(depth * Float64(pitch_modulation[index]))
             phase_accumulator += instantaneous / sample_rate_value
         end
     end
     output
+end
+
+"""Apply a normalized bipolar amplitude source to an existing signal."""
+function amplitude_modulation(input::AbstractVector{<:Real}, modulation::AbstractVector{<:Real};
+        depth::Real = 1.0)
+    _apply_amplitude_modulation(input, modulation, depth)
 end
 
 """Render a bipolar low-frequency oscillator for use as a modulation source."""
@@ -141,13 +182,20 @@ end
 
 """Apply a stable two-integrator state-variable filter to a mono signal."""
 function state_variable_filter(input::AbstractVector{<:Real}, cutoff::Real,
-        resonance::Real, sample_rate::Integer; mode::Symbol = :low)
+        resonance::Real, sample_rate::Integer; mode::Symbol = :low,
+        cutoff_modulation::AbstractVector{<:Real} = Float64[], cutoff_depth::Real = 0.0)
     sample_rate > 0 || throw(ArgumentError("sample_rate must be positive"))
     0 < cutoff < sample_rate / 2 || throw(ArgumentError("cutoff must be below the Nyquist frequency"))
     0 <= resonance <= 1 || throw(ArgumentError("resonance must be between zero and one"))
     mode in (:low, :high, :band, :notch) || throw(ArgumentError("unsupported filter mode '$(mode)'"))
+    isfinite(Float64(cutoff_depth)) && cutoff_depth >= 0 ||
+        throw(ArgumentError("cutoff_depth must be non-negative"))
+    isempty(cutoff_modulation) || length(cutoff_modulation) == length(input) ||
+        throw(ArgumentError("cutoff_modulation must match the signal length"))
 
-    g = tan(pi * Float64(cutoff) / Float64(sample_rate))
+    cutoff_value = Float64(cutoff)
+    sample_rate_value = Float64(sample_rate)
+    g = tan(pi * cutoff_value / sample_rate_value)
     damping = 2.0 * (1.0 - Float64(resonance))
     integrator_one = 0.0
     integrator_two = 0.0
@@ -156,8 +204,17 @@ function state_variable_filter(input::AbstractVector{<:Real}, cutoff::Real,
     for index in eachindex(input)
         drive = Float64(input[index])
         v3 = drive - damping * integrator_two
-        band = (g * v3 + integrator_one) / (1.0 + g * (g + damping))
-        low = integrator_two + g * band
+        effective_g = if isempty(cutoff_modulation) || cutoff_depth == 0
+            g
+        else
+            modulated_cutoff = cutoff_value *
+                exp2(Float64(cutoff_depth) * _normalized_bipolar(cutoff_modulation[index]))
+            limited_cutoff = clamp(modulated_cutoff, eps(Float64), prevfloat(sample_rate_value / 2.0))
+            tan(pi * limited_cutoff / sample_rate_value)
+        end
+        band = (effective_g * v3 + integrator_one) /
+            (1.0 + effective_g * (effective_g + damping))
+        low = integrator_two + effective_g * band
         high = v3 - damping * band
         notch = low + high
         integrator_one = 2.0 * band - integrator_one
