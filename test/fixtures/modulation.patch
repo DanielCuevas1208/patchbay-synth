@@ -1,0 +1,8 @@
+sample_rate 8
+duration 1.0
+output output/modulation.wav
+node source lfo waveform=square frequency=1 amplitude=2
+node tone osc waveform=square frequency=0 amplitude=0.8 amplitude_depth=1
+node master gain amount=1
+modulate source -> tone.amplitude
+connect tone -> master

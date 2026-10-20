@@ -9,6 +9,7 @@ const PROJECT_ROOT = dirname(@__DIR__)
     @test patch.duration == 4.0
     @test length(patch.nodes) == 13
     @test length(patch.connections) == 12
+    @test length(patch.modulations) == 2
     @test patch.nodes[1].kind == :osc
     @test patch.nodes[1].params[:waveform] == "saw"
 
@@ -86,6 +87,78 @@ end
     @test_throws ArgumentError parse_patch("node lead voice\nnote lead pitch=128 duration=1")
     @test_throws ArgumentError parse_patch("node lead voice\nnote lead pitch=60 duration=1 velocity=2")
 end
+
+@testset "Typed modulation routes" begin
+    patch = parse_patch("""
+        sample_rate 8000
+        duration 0.25
+        node source lfo waveform=sine frequency=2 amplitude=1
+        node tone osc waveform=sine frequency=220 amplitude=0.4 amplitude_depth=0.75
+        node filter svf cutoff=900 resonance=0.2 cutoff_depth=1.5 mode=low
+        node master gain amount=0.8
+        modulate source -> tone.amplitude
+        modulate source -> filter.cutoff
+        connect tone -> filter
+        connect filter -> master
+    """)
+    @test length(patch.modulations) == 2
+    @test patch.modulations[1].parameter == :amplitude
+    @test patch.modulations[1].rate == :audio
+    @test patch.modulations[1].range == :bipolar
+    @test patch.modulations[2].parameter == :cutoff
+    @test all(isfinite, render_patch(patch).samples)
+
+    @test_throws ArgumentError parse_patch("""
+        node source lfo
+        node tone osc
+        modulate source -> tone.unknown
+    """)
+    unsupported_target = parse_patch("""
+        node source lfo
+        node target adsr
+        modulate source -> target.amplitude
+    """)
+    @test_throws ArgumentError render_patch(unsupported_target)
+
+    cyclic_modulation = parse_patch("""
+        node left osc
+        node right osc
+        modulate left -> right.amplitude
+        modulate right -> left.amplitude
+    """)
+    @test_throws ArgumentError render_patch(cyclic_modulation)
+end
+
+@testset "Amplitude and cutoff conversion" begin
+    square = oscillator(:square, 0, 1_000, 3; amplitude = 0.8,
+        amplitude_modulation = [2.0, -2.0, 0.0], amplitude_depth = 1.0)
+    @test square == [0.8, 0.0, 0.8]
+    @test amplitude_modulation([1.0, -1.0], [2.0, -2.0]; depth = 0.5) == [1.0, -0.5]
+    @test_throws ArgumentError oscillator(:sine, 100, 1_000, 2;
+        amplitude_modulation = [0.0, 0.0], amplitude_depth = 1.1)
+
+    impulse = [1.0; zeros(31)]
+    clipped_high = state_variable_filter(impulse, 3_900, 0.2, 8_000;
+        cutoff_modulation = fill(2.0, length(impulse)), cutoff_depth = 1.0)
+    nyquist_edge = state_variable_filter(impulse, 3_900, 0.2, 8_000;
+        cutoff_modulation = fill(1.0, length(impulse)), cutoff_depth = 1.0)
+    low_cutoff = state_variable_filter(impulse, 1_000, 0.2, 8_000;
+        cutoff_modulation = fill(-1.0, length(impulse)), cutoff_depth = 1.0)
+    high_cutoff = state_variable_filter(impulse, 1_000, 0.2, 8_000;
+        cutoff_modulation = fill(1.0, length(impulse)), cutoff_depth = 1.0)
+    @test clipped_high == nyquist_edge
+    @test low_cutoff != high_cutoff
+    @test all(isfinite, clipped_high)
+end
+
+@testset "Modulation fixture" begin
+    patch_path = joinpath(@__DIR__, "fixtures", "modulation.patch")
+    expected_path = joinpath(@__DIR__, "fixtures", "modulation.samples")
+    result = render_patch(parse_patch_file(patch_path))
+    expected = parse.(Float64, filter(line -> !isempty(line), readlines(expected_path)))
+    @test result.samples == expected
+end
+
 @testset "Graph evaluation and metrics" begin
     patch = parse_patch("""
         sample_rate 8000

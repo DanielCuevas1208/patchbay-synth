@@ -10,7 +10,7 @@ node shimmer osc waveform=triangle frequency=330 amplitude=0.08 pitch_depth=0.15
 node bass_vib lfo waveform=sine frequency=4.2 amplitude=0.9
 node melody_vib lfo waveform=sine frequency=5.6 amplitude=1.2
 node shimmer_vib lfo waveform=sine frequency=0.6 amplitude=1.4
-node lead voice waveform=triangle amplitude=0.09 attack=0.01 release=0.12
+node lead voice waveform=triangle amplitude=0.09 amplitude_depth=0.65 attack=0.01 release=0.12
 note lead pitch=57 start=0.0 duration=0.70 velocity=0.8
 note lead pitch=60 start=0.80 duration=0.70 velocity=0.7
 note lead pitch=64 start=1.60 duration=0.70 velocity=0.8
@@ -20,13 +20,15 @@ node bass_env adsr attack=0.02 decay=0.18 sustain=0.62 release=0.40 gate=3.45
 node melody_env adsr attack=0.04 decay=0.22 sustain=0.58 release=0.42 gate=3.35
 node shimmer_env adsr attack=0.08 decay=0.30 sustain=0.42 release=0.50 gate=3.20
 
-node lowpass svf cutoff=1900 resonance=0.22 mode=low
+node lowpass svf cutoff=1900 cutoff_depth=0.35 resonance=0.22 mode=low
 node echo delay time=0.28 feedback=0.24 mix=0.20
 node master gain amount=0.78
 
 connect bass_vib -> bass
 connect melody_vib -> melody
 connect shimmer_vib -> shimmer
+modulate shimmer_vib -> lead.amplitude
+modulate bass_vib -> lowpass.cutoff
 connect bass -> bass_env
 connect melody -> melody_env
 connect shimmer -> shimmer_env

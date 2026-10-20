@@ -11,6 +11,15 @@ struct Connection
     target::String
 end
 
+"""A typed, audio-rate modulation route into a node parameter."""
+struct ModulationInput
+    source::String
+    target::String
+    parameter::Symbol
+    rate::Symbol
+    range::Symbol
+end
+
 """A scheduled note for a named polyphonic voice node."""
 struct NoteEvent
     group::String
@@ -28,11 +37,24 @@ struct Patch
     nodes::Vector{NodeSpec}
     connections::Vector{Connection}
     notes::Vector{NoteEvent}
+    modulations::Vector{ModulationInput}
 end
 
 Patch(sample_rate::Integer, duration::Real, output_path::AbstractString,
+    nodes::Vector{NodeSpec}, connections::Vector{Connection}, notes::Vector{NoteEvent},
+    modulations::Vector{ModulationInput}) =
+    Patch(Int(sample_rate), Float64(duration), String(output_path), nodes, connections,
+        notes, modulations)
+
+Patch(sample_rate::Integer, duration::Real, output_path::AbstractString,
     nodes::Vector{NodeSpec}, connections::Vector{Connection}) =
-    Patch(Int(sample_rate), Float64(duration), String(output_path), nodes, connections, NoteEvent[])
+    Patch(Int(sample_rate), Float64(duration), String(output_path), nodes, connections,
+        NoteEvent[], ModulationInput[])
+
+Patch(sample_rate::Integer, duration::Real, output_path::AbstractString,
+    nodes::Vector{NodeSpec}, connections::Vector{Connection}, notes::Vector{NoteEvent}) =
+    Patch(Int(sample_rate), Float64(duration), String(output_path), nodes, connections,
+        notes, ModulationInput[])
 
 """A rendered mono track and the signal produced by every graph node."""
 struct RenderResult
@@ -49,6 +71,12 @@ struct Spectrogram
 end
 
 const NODE_KINDS = Set([:osc, :lfo, :voice, :adsr, :svf, :gain, :delay])
+const _MODULATION_PORTS = Dict{Symbol,Set{Symbol}}(
+    :osc => Set([:amplitude]),
+    :voice => Set([:amplitude]),
+    :svf => Set([:cutoff]),
+    :gain => Set([:amplitude]),
+)
 
 function _parameter(node::NodeSpec, key::Symbol, default::String)
     get(node.params, key, default)
